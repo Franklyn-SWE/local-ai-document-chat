@@ -79,3 +79,43 @@ Corpus updates are eventually consistent rather than instantaneous.
 A filesystem change is considered ready to serve after it has been detected,
 its signature has remained unchanged for the configured stability period, and
 the complete replacement snapshot has been successfully built and promoted.
+
+---
+
+## ADR-003 — Use lexical retrieval with explicit context budgeting
+
+**Date:** 2026-10-07
+
+### Context
+
+The service needs to select evidence from a small local corpus while remaining
+fully local, explainable, and easy to review.
+
+### Decision
+
+Use a small BM25-style lexical retriever over the current immutable corpus
+snapshot.
+
+Rank candidate chunks, apply a configurable top-k and minimum relevance score,
+then select only chunks that fit within an explicit context-token budget.
+
+Token counts are currently estimated using approximately four characters per
+token and are labelled as estimates.
+
+### Alternatives considered
+
+- Embedding-based semantic retrieval
+- Vector databases such as Qdrant
+- RAG frameworks with built-in retrievers
+
+### Rationale
+
+Lexical retrieval removes the need for an embedding model and vector database,
+keeps the system offline and deterministic, and makes evidence selection easy
+to inspect during live review.
+
+### Consequences
+
+Semantic matching is weaker when user terminology differs significantly from
+the source documents. This is an accepted limitation for the assessment-scale
+corpus.

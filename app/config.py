@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         gt=0,
         alias="CORPUS_POLL_INTERVAL_SECONDS",
     )
+
     corpus_stability_delay_seconds: float = Field(
         default=0.5,
         gt=0,
@@ -37,10 +38,29 @@ class Settings(BaseSettings):
         gt=0,
         alias="CHUNK_SIZE_CHARS",
     )
+
     chunk_overlap_chars: int = Field(
         default=200,
         ge=0,
         alias="CHUNK_OVERLAP_CHARS",
+    )
+   # Maximum number of top-ranked chunks considered before context budgeting.
+    retrieval_top_k: int = Field(
+        default=8,
+        gt=0,
+        alias="RETRIEVAL_TOP_K",
+    )
+   # Minimum lexical relevance score required for a chunk to remain evidence
+    retrieval_min_score: float = Field(
+        default=0.10,
+        ge=0,
+        alias="RETRIEVAL_MIN_SCORE",
+    )
+   # Maximum estimated token allowance for retrieved evidence sent to the model
+    context_token_budget: int = Field(
+        default=1800,
+        gt=0,
+        alias="CONTEXT_TOKEN_BUDGET",
     )
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
