@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     )
 
 
+# Maximum time allowed for a local model request before failing cleanly.
+    llm_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        alias="LLM_TIMEOUT_SECONDS",
+    )
+   
+
 @lru_cache
 def get_settings() -> Settings:
     """Return the validated application settings."""

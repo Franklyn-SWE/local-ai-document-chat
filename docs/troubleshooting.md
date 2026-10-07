@@ -83,3 +83,93 @@ project metadata, Ruff target, and mypy configuration with Python 3.11.
 
 Local development, testing, static analysis, CI, and the final container can
 use the same Python interpreter family.
+
+---
+
+## 2026-10-07 — Local inference integration issues
+
+### Issue 1 — Docker Model Runner was unavailable
+
+**Symptom**
+
+`docker model status` reported that Docker Model Runner was not running, and the local API on port `12434` was unreachable.
+
+**Cause**
+
+Docker Model Runner was disabled in Docker Desktop.
+
+**Resolution**
+
+Enabled Docker Model Runner and verified the service with:
+
+`docker model status`
+
+and:
+
+`curl.exe http://localhost:12434/engines/v1/models`
+
+---
+
+### Issue 2 — Application could not reach the local model
+
+**Symptom**
+
+The `/chat` endpoint selected the correct evidence and started an SSE response, but returned:
+
+`inference_failed: local model is unavailable`
+
+**Cause**
+
+The local `.env` still used:
+
+`http://host.docker.internal:12434/engines/v1`
+
+That hostname is intended for container-to-host access, while FastAPI was running directly on the Windows host.
+
+**Resolution**
+
+Changed the local development configuration to:
+
+`LLM_URL=http://localhost:12434/engines/v1`
+
+Restarted Uvicorn because application settings are cached.
+
+---
+
+### Issue 3 — Initial model quality was too weak
+
+**Symptom**
+
+`SmolLM2 360M Q4_K_M` received the correct retrieved evidence but sometimes claimed the evidence was insufficient even when the answer was explicitly present.
+
+**Resolution**
+
+Evaluated stronger local models while preserving the assessment constraints.
+
+- Qwen2.5 0.5B F16 produced better grounded answers but was rejected for the final configuration because it was not quantized.
+- Llama 3.2 `1B-Q4_0` was rejected because Docker reported approximately `1.24B` parameters, exceeding the assessment limit.
+- Final model selected:
+
+`huggingface.co/qwen/qwen2.5-0.5b-instruct-gguf:Q4_K_M`
+
+Docker Model Runner reports approximately `630M` parameters and `Q4_K_M` quantization.
+
+The final Qwen model produced a correct grounded answer while remaining local, quantized, and below the one-billion-parameter limit.
+
+---
+
+### Issue 4 — Qwen GGUF pull initially failed
+
+**Symptom**
+
+The first attempt to pull the quantized Qwen model failed with:
+
+`There is not enough space on the disk.`
+
+**Cause**
+
+Insufficient free space on the Windows system drive during the temporary model download/import process.
+
+**Resolution**
+
+Removed unused local models and retried the pull successfully.

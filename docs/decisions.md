@@ -119,3 +119,84 @@ to inspect during live review.
 Semantic matching is weaker when user terminology differs significantly from
 the source documents. This is an accepted limitation for the assessment-scale
 corpus.
+
+---
+
+## ADR-004 — Use a local OpenAI-compatible inference boundary
+
+**Date:** 2026-10-07
+
+### Context
+
+The service must use a local quantized model, remain provider-configurable, and
+support genuine progressive streaming without cloud inference.
+
+### Decision
+
+Use Docker Model Runner through its OpenAI-compatible chat-completions API.
+
+Keep the inference endpoint and model identifier environment-driven through
+`LLM_URL` and `LLM_MODEL`.
+
+Use an asynchronous `httpx` client that parses streaming SSE events
+incrementally.
+
+The final assessment model is:
+
+`huggingface.co/qwen/qwen2.5-0.5b-instruct-gguf:Q4_K_M`
+
+Docker Model Runner reports approximately 630M parameters and Q4_K_M
+quantization.
+
+### Rationale
+
+The HTTP boundary keeps retrieval and prompt assembly independent from the
+model provider and makes streaming behaviour easy to inspect during review.
+
+Qwen2.5 0.5B was selected because it remains below the assessment's one-billion
+parameter limit while producing more reliable grounded answers than the
+smaller model tested during development.
+
+### Consequences
+
+Alternative local models can be selected without application-code changes if
+they expose the same OpenAI-compatible contract.
+
+Model availability and quality remain operational concerns and must be tested.
+
+---
+
+## ADR-005 — Treat retrieved documents as untrusted evidence
+
+**Date:** 2026-10-07
+
+### Context
+
+Retrieved documents may contain instruction-like or malicious text, while the
+application must preserve its own instructions and source attribution.
+
+### Decision
+
+Keep trusted application instructions in the system-message channel.
+
+Place retrieved documents only inside explicitly labelled untrusted evidence
+sections.
+
+Source identifiers remain application-controlled rather than model-generated.
+
+Chat responses are exposed as server-sent events with separate `sources`,
+`token`, `done`, and `error` event types.
+
+### Rationale
+
+This creates a clear trust boundary between application policy and document
+content.
+
+Structured SSE events allow the client to distinguish answer text, source
+metadata, normal completion, and inference failure.
+
+### Consequences
+
+Prompt-injection resistance must still be tested with adversarial documents.
+
+Clients must handle partial streams and structured error events correctly.
