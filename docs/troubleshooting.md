@@ -61,3 +61,25 @@ Pydantic-generated settings interface.
 
 Configuration remains fail-fast at runtime while the project also passes
 strict static type checking.
+
+## 2026-10-07 — Development Python version did not match intended runtime
+
+### Symptom
+
+The initial virtual environment was created using Python 3.14 because that was
+the machine's default Python installation.
+
+### Diagnosis
+
+Using a different interpreter version locally from the version intended for
+CI and the container would introduce avoidable environment drift.
+
+### Resolution
+
+Recreated the project virtual environment using Python 3.11 and aligned the
+project metadata, Ruff target, and mypy configuration with Python 3.11.
+
+### Result
+
+Local development, testing, static analysis, CI, and the final container can
+use the same Python interpreter family.

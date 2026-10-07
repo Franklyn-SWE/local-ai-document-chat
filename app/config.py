@@ -18,7 +18,31 @@ class Settings(BaseSettings):
 
     llm_url: HttpUrl = Field(alias="LLM_URL")
     llm_model: str = Field(min_length=1, alias="LLM_MODEL")
+
     data_dir: str = Field(default="/data", alias="DATA_DIR")
+
+    corpus_poll_interval_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        alias="CORPUS_POLL_INTERVAL_SECONDS",
+    )
+    corpus_stability_delay_seconds: float = Field(
+        default=0.5,
+        gt=0,
+        alias="CORPUS_STABILITY_DELAY_SECONDS",
+    )
+
+    chunk_size_chars: int = Field(
+        default=1600,
+        gt=0,
+        alias="CHUNK_SIZE_CHARS",
+    )
+    chunk_overlap_chars: int = Field(
+        default=200,
+        ge=0,
+        alias="CHUNK_OVERLAP_CHARS",
+    )
+
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     model_config = SettingsConfigDict(
@@ -32,4 +56,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return the validated application settings."""
-    return Settings()
+    settings = Settings()
+
+    if settings.chunk_overlap_chars >= settings.chunk_size_chars:
+        raise ValueError(
+            "CHUNK_OVERLAP_CHARS must be smaller than CHUNK_SIZE_CHARS"
+        )
+
+    return settings

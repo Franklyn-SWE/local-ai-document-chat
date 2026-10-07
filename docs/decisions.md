@@ -37,3 +37,45 @@ More complex RAG frameworks, external vector databases, and hosted AI services.
 
 Some advanced retrieval features are intentionally deferred unless they are
 shown to be necessary.
+
+---
+
+## ADR-002 — Use polling and immutable corpus snapshots for live refresh
+
+**Date:** 2026-10-07
+
+### Context
+
+Documents may be added, modified, renamed, or removed while the service is
+running. Subsequent requests must use only the current corpus, and files may
+be observed while they are still being written.
+
+### Decision
+
+Use periodic filesystem polling with a configurable stability delay.
+
+When a stable change is detected, build a complete new immutable corpus
+snapshot and atomically replace the active snapshot.
+
+### Alternatives considered
+
+- Native filesystem event watchers
+- Manual re-index endpoint
+- Mutating the active corpus in place
+
+### Rationale
+
+Polling provides predictable behaviour across local development and Docker
+bind mounts.
+
+Immutable snapshot replacement prevents requests from observing partially
+updated corpus state and ensures removed documents cannot leave stale chunks
+behind.
+
+### Consequences
+
+Corpus updates are eventually consistent rather than instantaneous.
+
+A filesystem change is considered ready to serve after it has been detected,
+its signature has remained unchanged for the configured stability period, and
+the complete replacement snapshot has been successfully built and promoted.
