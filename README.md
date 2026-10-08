@@ -36,6 +36,12 @@ The current implementation uses:
 
 ---
 
+## Application interface
+
+The Streamlit interface provides a simple local browser experience for asking document-grounded questions, viewing progressively streamed answers, and seeing the application-controlled source chunks used as evidence.
+
+![Local RAG Document Chat interface](docs/images/local-rag-ui.png)
+
 ## Current capabilities
 
 The service currently supports:
