@@ -249,12 +249,12 @@ def _stream_answer(question: str) -> None:
 
 
 st.set_page_config(
-    page_title="Local AI Document Chat",
+    page_title="Local RAG Document Chat",
     page_icon="📚",
     layout="centered",
 )
 
-st.title("Local AI Document Chat")
+st.title("Local RAG Document Chat")
 
 st.caption(
     "Ask questions grounded only in the documents currently "

@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="Local AI Document Chat",
+    title="Local RAG Document Chat",
     version="0.1.0",
     description="Local document-grounded chat service.",
     lifespan=lifespan,
