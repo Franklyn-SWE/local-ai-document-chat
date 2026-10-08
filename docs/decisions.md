@@ -200,3 +200,59 @@ metadata, normal completion, and inference failure.
 Prompt-injection resistance must still be tested with adversarial documents.
 
 Clients must handle partial streams and structured error events correctly.
+
+---
+
+## ADR-006 — Thin Streamlit UI and stronger evidence sufficiency
+
+**Date:** 2026-10-08
+
+### Context
+
+The assessment requires a browser interface that streams grounded answers,
+shows sources, handles failures safely, and reflects corpus changes without
+manual reindexing.
+
+During live UI testing, BM25 correctly ranked the best available chunk but
+could still treat incidental lexical overlap as sufficient evidence in a very
+small corpus.
+
+For example, after deleting the annual-leave document, a question about annual
+leave could still match the remote-work policy because both contained generic
+terms such as "days" and "per".
+
+### Decision
+
+Use Streamlit as a thin presentation layer over the FastAPI `/chat` endpoint.
+
+The UI:
+
+- sends questions only to the backend,
+- consumes structured SSE events,
+- displays answers progressively,
+- displays application-controlled source identifiers,
+- renders model output as plain text,
+- handles insufficient evidence and backend failures without exposing internal
+  errors.
+
+Retrieval continues to use BM25 for ranking, but evidence must also satisfy a
+meaningful lexical query-coverage gate before it can be passed to the model.
+
+### Rationale
+
+Ranking and evidence sufficiency are separate concerns.
+
+In a small corpus, the highest-ranked document is not necessarily relevant
+enough to answer the question. The additional coverage gate reduces accidental
+matches without introducing a larger embedding or reranking dependency.
+
+Keeping Streamlit thin also ensures that retrieval, prompt security, corpus
+state, and inference remain controlled by the backend.
+
+### Consequences
+
+The application now rejects unrelated and weakly related evidence before
+inference.
+
+The lexical coverage rule remains intentionally lightweight and should be
+validated against a broader retrieval evaluation set before production use.

@@ -16,11 +16,78 @@ from app.corpus.models import DocumentChunk
 from app.retrieval.models import RetrievalResult, ScoredChunk
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
+# Common query words carry little evidence value. Excluding them from the
+# coverage check prevents a chunk being accepted only because it contains
+# generic language such as "the", "is", or "company".
+_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "company",
+    "does",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+}
 
 
 def _tokenize(text: str) -> list[str]:
     """Normalise text into lowercase lexical tokens."""
     return _TOKEN_PATTERN.findall(text.lower())
+
+def _has_meaningful_overlap(
+    query: str,
+    chunk_text: str,
+) -> bool:
+    """
+    Require sufficient meaningful query coverage before accepting evidence.
+
+    BM25 ranks the best available chunks, but in a small corpus the highest
+    ranked chunk can still be unrelated. This gate therefore checks how much
+    of the meaningful query vocabulary is actually represented in the chunk.
+    """
+    query_terms = {
+        token
+        for token in _tokenize(query)
+        if token not in _STOP_WORDS
+    }
+
+    if not query_terms:
+        return False
+
+    chunk_terms = set(_tokenize(chunk_text))
+    matching_terms = query_terms & chunk_terms
+
+    # Short queries need at least one meaningful lexical match. For longer
+    # queries, require enough query coverage to reject incidental overlap
+    # such as sharing only generic terms like "days" and "per".
+    if len(query_terms) <= 2:
+        return len(matching_terms) >= 1
+
+    coverage = len(matching_terms) / len(query_terms)
+
+    return coverage >= 0.40
 
 
 def _estimate_tokens(text: str) -> int:
@@ -123,11 +190,16 @@ def retrieve(
 
     ranked = _score_chunks(query, chunks)
 
+    # Ranking alone does not prove that evidence is sufficient. In a tiny corpus,
+# BM25 can still return a "best" chunk even when the question is unrelated.
+# Require both the configured score and meaningful lexical query coverage.
     candidates = tuple(
         item
         for item in ranked[:top_k]
         if item.score >= min_score
+        and _has_meaningful_overlap(query, item.chunk.text)
     )
+
 
     selected: list[ScoredChunk] = []
     estimated_context_tokens = 0

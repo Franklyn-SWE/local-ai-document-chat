@@ -133,3 +133,30 @@ def test_selected_chunk_ids_are_exposed() -> None:
     assert result.selected_chunk_ids == (
         "policy.md#chunk-0000",
     )
+
+def test_partial_overlap_does_not_become_sufficient_evidence() -> None:
+    """
+    Reject a chunk that shares incidental words but not the query's subject.
+
+    This protects against a small corpus treating the remote-work policy as
+    annual-leave evidence merely because both texts contain words such as
+    "days" or "per".
+    """
+    chunks = (
+        _chunk(
+            "remote-policy.md#chunk-0000",
+            "Remote work is permitted up to two days per week "
+            "with manager approval.",
+        ),
+    )
+
+    result = retrieve(
+        "How many days of paid annual leave are employees entitled to per year?",
+        chunks,
+        top_k=8,
+        min_score=0.10,
+        token_budget=500,
+    )
+
+    assert result.insufficient_evidence is True
+    assert result.selected == ()
