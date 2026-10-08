@@ -1,5 +1,8 @@
 # Local RAG Document Chat
 
+**Built by [Franklyn Oliha](https://franklynoliha.com)**  
+Software Engineer · Data Scientist · AI/ML Engineer
+
 A local, container-ready document-grounded chat service designed for safe, explainable, and fully local retrieval-augmented generation.
 
 ## Overview
@@ -41,6 +44,312 @@ The current implementation uses:
 The Streamlit interface provides a simple local browser experience for asking document-grounded questions, viewing progressively streamed answers, and seeing the application-controlled source chunks used as evidence.
 
 ![Local RAG Document Chat interface](docs/images/local-rag-ui.png)
+
+## Reviewer Quick Start
+
+### Prerequisites
+
+The local development setup requires:
+
+- Git
+- Python 3.11
+- Docker Desktop
+- Docker Model Runner
+- a modern web browser
+
+No cloud AI API key is required.
+
+---
+
+### 1. Clone the repository
+
+```powershell
+git clone https://github.com/Franklyn-SWE/local-ai-document-chat.git
+cd local-ai-document-chat
+```
+
+---
+
+### 2. Create and activate the Python environment
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Install the project and development dependencies:
+
+```powershell
+pip install -e ".[dev]"
+```
+
+---
+
+### 3. Create the local environment file
+
+Copy the example configuration:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+For local development, confirm these values in `.env`:
+
+```env
+LLM_URL=http://localhost:12434/engines/v1
+DATA_DIR=./data
+BACKEND_URL=http://127.0.0.1:8000
+```
+
+The remaining settings can use the defaults provided in `.env.example`.
+
+The configured local model is:
+
+```env
+LLM_MODEL=huggingface.co/qwen/qwen2.5-0.5b-instruct-gguf:Q4_K_M
+```
+
+The `.env` file is excluded from Git.
+
+---
+
+### 4. Start Docker Desktop and Docker Model Runner
+
+Ensure Docker Desktop is running.
+
+Check Docker:
+
+```powershell
+docker info
+```
+
+Enable Docker Model Runner if required:
+
+```powershell
+docker desktop enable model-runner
+```
+
+Verify its status:
+
+```powershell
+docker model status
+```
+
+Expected:
+
+```text
+Docker Model Runner is running
+```
+
+---
+
+### 5. Pull the local model
+
+The model only needs to be pulled once:
+
+```powershell
+docker model pull hf.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q4_K_M
+```
+
+Verify that it is available:
+
+```powershell
+docker model list
+```
+
+The local model endpoint can also be checked with:
+
+```powershell
+curl.exe http://localhost:12434/engines/v1/models
+```
+
+---
+
+### 6. Start the FastAPI backend
+
+Open the first terminal in the project directory:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+```
+
+The backend will be available at:
+
+```text
+http://127.0.0.1:8000
+```
+
+Optional health check:
+
+```powershell
+curl.exe http://127.0.0.1:8000/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+Keep this terminal running.
+
+---
+
+### 7. Start the Streamlit browser interface
+
+Open a second terminal in the same project directory:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+streamlit run ui/app.py
+```
+
+The browser interface should open automatically at:
+
+```text
+http://localhost:8501
+```
+
+If it does not open automatically, enter that address manually in a browser.
+
+---
+
+### 8. Ask a document-grounded question
+
+The repository includes sample documents inside:
+
+```text
+./data
+```
+
+For example, ask:
+
+```text
+How many days per week can employees work remotely?
+```
+
+A successful response should be grounded in the corpus and show a supporting source such as:
+
+```text
+policy.md#chunk-0000
+```
+
+Another example:
+
+```text
+How many days of paid annual leave are employees entitled to per year?
+```
+
+Expected supporting source:
+
+```text
+leave-policy.md#chunk-0000
+```
+
+---
+
+### 9. Test insufficient evidence
+
+Ask a question that is not supported by the current corpus, for example:
+
+```text
+What is the company Wi-Fi password?
+```
+
+Expected behaviour:
+
+```text
+The available documents do not contain enough relevant evidence to answer this question.
+```
+
+The model should not invent an answer when suitable evidence is unavailable.
+
+---
+
+### 10. Add or change documents while the application is running
+
+Supported corpus formats are:
+
+```text
+.txt
+.md
+```
+
+Documents must be valid UTF-8.
+
+Place documents directly inside:
+
+```text
+./data
+```
+
+For example:
+
+```text
+data/
+├── policy.md
+├── leave-policy.md
+└── handbook.txt
+```
+
+While FastAPI and Streamlit remain running, documents can be:
+
+- added
+- modified
+- renamed
+- deleted
+
+The application automatically detects stable filesystem changes and updates the active corpus.
+
+No application restart, Docker rebuild, or manual reindex operation is required.
+
+---
+
+### Local runtime summary
+
+```text
+Docker Desktop
+      ↓
+Docker Model Runner
+      ↓
+Qwen2.5 0.5B Q4_K_M
+      ↓
+FastAPI backend
+      ↓
+Streamlit UI
+      ↓
+Browser
+```
+
+### Main local addresses
+
+```text
+FastAPI:    http://127.0.0.1:8000
+Streamlit:  http://localhost:8501
+Model API:  http://localhost:12434/engines/v1
+```
+
+### Quick verification commands
+
+```powershell
+docker model status
+docker model list
+curl.exe http://127.0.0.1:8000/health
+pytest -q
+ruff check .
+mypy app
+```
+
+The expected project quality checkpoint is:
+
+```text
+32 tests passed
+Ruff checks passed
+mypy checks passed
+```
 
 ## Current capabilities
 
@@ -1221,10 +1530,3 @@ The implementation favours:
 The goal is not to build the largest possible RAG platform.
 
 The goal is to build a small local system whose behaviour, security properties, retrieval decisions, configuration, trade-offs, and failure handling can be demonstrated and explained clearly.
-
-# Local RAG Document Chat
-
-**Built by [Franklyn Oliha](https://franklynoliha.com)**  
-Software Engineer · Data Scientist · AI/ML Engineer
-
-A local, container-ready document-grounded chat service designed for safe, explainable, and fully local retrieval-augmented generation.
