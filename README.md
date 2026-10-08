@@ -1221,3 +1221,10 @@ The implementation favours:
 The goal is not to build the largest possible RAG platform.
 
 The goal is to build a small local system whose behaviour, security properties, retrieval decisions, configuration, trade-offs, and failure handling can be demonstrated and explained clearly.
+
+# Local RAG Document Chat
+
+**Built by [Franklyn Oliha](https://franklynoliha.com)**  
+Software Engineer · Data Scientist · AI/ML Engineer
+
+A local, container-ready document-grounded chat service designed for safe, explainable, and fully local retrieval-augmented generation.
