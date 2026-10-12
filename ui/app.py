@@ -269,7 +269,7 @@ with st.sidebar:
     else:
         st.error("Backend unavailable")
 
-    st.caption("Local inference via Docker Model Runner")
+    st.caption("Local inference via Ollama (Qwen 2.5)")
 
 with st.form("question_form"):
     question = st.text_area(

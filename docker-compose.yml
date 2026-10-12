@@ -1,0 +1,24 @@
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      LLM_URL: http://host.docker.internal:11434/v1
+      LLM_MODEL: qwen2.5:0.5b
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ui:
+    build: .
+    command: streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
+    ports:
+      - "8501:8501"
+    environment:
+      BACKEND_URL: http://api:8000
+    depends_on:
+      - api
