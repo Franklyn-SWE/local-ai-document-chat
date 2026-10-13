@@ -4,7 +4,7 @@
 
 Software Engineer · Data Scientist · AI/ML Engineer
 
-A local, Docker Compose-containerised document-grounded chat service designed for safe, explainable, and fully local retrieval-augmented generation.
+A local, Docker Compose-containerised document-grounded chat service designed for safe, explainable retrieval-augmented generation, with built-in Prometheus and Grafana observability.
 
 ## Overview
 
@@ -26,6 +26,8 @@ The application is designed for:
 - safe browser rendering
 - environment-driven configuration
 - explainable architecture
+- structured request and RAG lifecycle logging
+- Prometheus monitoring and provisioned Grafana dashboards
 
 The current implementation uses:
 
@@ -37,6 +39,7 @@ The current implementation uses:
 - a meaningful lexical coverage gate for evidence sufficiency
 - immutable corpus snapshots for safe live refresh
 - Server-Sent Events (SSE) for progressive response streaming
+- Prometheus for metrics collection and Grafana for monitoring visualisation
 
 ---
 
@@ -48,7 +51,7 @@ The Streamlit interface, deployed in its own Docker container, provides a simple
 
 ## Reviewer Quick Start — Docker Compose (recommended)
 
-The **FastAPI backend** and **Streamlit UI** are built as Docker images and run in separate containers. **Ollama runs on the host**, serving a small local Qwen model through its OpenAI-compatible API. No cloud AI API key is required.
+Docker Compose runs the **FastAPI backend**, **Streamlit UI**, **Prometheus** and **Grafana** as four services. The API and UI are built from the project `Dockerfile`; Prometheus and Grafana use their respective images. **Ollama runs separately on the host** and serves the local Qwen model through its OpenAI-compatible API. No cloud AI API key is required.
 
 ### Prerequisites
 
@@ -78,7 +81,17 @@ curl.exe http://localhost:11434/api/tags
 
 The model is downloaded once and reused for later sessions. Ollama is **not** started by this project's Compose file.
 
-### 3. Build the application images
+### 3. Configure the Grafana administrator password
+
+The monitoring-enabled Compose configuration requires a Grafana administrator password before startup. Create or edit a private `.env` file at the repository root and add:
+
+```dotenv
+GRAFANA_ADMIN_PASSWORD=replace-with-a-strong-unique-password
+```
+
+If you already use `.env` for direct-Python settings, **add the variable to that same file** instead of overwriting your existing configuration. The Grafana username is `admin` in the supplied Compose file. Never commit `.env`; verify that Git ignores it using `git check-ignore .env`.
+
+### 4. Build the application images
 
 Start Docker Desktop, then run from the repository root:
 
@@ -93,12 +106,12 @@ For a completely uncached rebuild (optional):
 docker compose build --no-cache
 ```
 
-This builds the `api` and `ui` images from the project `Dockerfile`. The model remains hosted by Ollama on the Windows host rather than inside either application container.
+This builds the `api` and `ui` images from the project `Dockerfile`. Compose also pulls the Prometheus and Grafana images when starting services. The model remains hosted by Ollama on the Windows host.
 
-### 4. Start and verify the containers
+### 5. Start and verify the containers
 
 ```powershell
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 curl.exe http://localhost:8000/health
 ```
@@ -109,16 +122,19 @@ Expected health response:
 { "status": "ok" }
 ```
 
-| Component    | From the host browser or terminal | Internal address                                       |
-| ------------ | --------------------------------- | ------------------------------------------------------ |
-| Streamlit UI | http://localhost:8501             | `http://ui:8501`                                       |
-| FastAPI      | http://localhost:8000             | `http://api:8000`                                      |
-| API docs     | http://localhost:8000/docs        | —                                                      |
-| Ollama       | http://localhost:11434            | `http://host.docker.internal:11434` from API container |
+| Component       | From the host browser or terminal | Internal address                                       |
+| --------------- | --------------------------------- | ------------------------------------------------------ |
+| Streamlit UI    | http://localhost:8501             | `http://ui:8501`                                       |
+| FastAPI         | http://localhost:8000             | `http://api:8000`                                      |
+| API docs        | http://localhost:8000/docs        | —                                                      |
+| FastAPI metrics | http://localhost:8000/metrics     | `http://api:8000/metrics`                              |
+| Prometheus      | http://localhost:9090             | `http://prometheus:9090`                               |
+| Grafana         | http://localhost:3000             | `http://grafana:3000`                                  |
+| Ollama          | http://localhost:11434            | `http://host.docker.internal:11434` from API container |
 
-Open **http://localhost:8501** to use the application.
+Open **http://localhost:8501** to use the application. Open **http://localhost:3000** and sign in with username `admin` and the `.env` password to view **Dashboards → RAG Monitoring → Local AI Document Chat | RAG Observability**. Check the scrape target at **http://localhost:9090/targets**; `rag-api` should show **UP**.
 
-### 5. Demonstrate document-grounded answers
+### 6. Demonstrate document-grounded answers
 
 The repository includes sample documents under `data/`. Ask:
 
@@ -136,7 +152,7 @@ How many days of paid annual leave are employees entitled to per year?
 
 The supporting evidence should include `leave-policy.md#chunk-0000` when the supplied sample document contains the relevant policy.
 
-### 6. Demonstrate insufficient evidence
+### 7. Demonstrate insufficient evidence
 
 Ask:
 
@@ -152,7 +168,7 @@ The available documents do not contain enough relevant evidence to answer this q
 
 The backend stops before model inference rather than asking the LLM to invent an unsupported answer.
 
-### 7. Demonstrate live document updates
+### 8. Demonstrate live document updates
 
 Supported UTF-8 corpus formats are `.txt` and `.md`. Files are placed directly in the host's `./data` directory, which is bind-mounted into the API container as `/data`.
 
@@ -160,11 +176,13 @@ While the containers remain running, **add, edit, rename or delete** a supported
 
 > **Document ingestion is filesystem-based.** The Streamlit interface provides a question-answering UI, not a document-upload feature.
 
-### 8. Inspect logs, stop and restart
+### 9. Inspect logs, stop and restart
 
 ```powershell
 docker compose logs --tail 50 api
 docker compose logs --tail 50 ui
+docker compose logs --tail 50 prometheus
+docker compose logs --tail 50 grafana
 docker compose down
 ```
 
@@ -176,7 +194,7 @@ docker compose up -d
 
 Use `docker compose up -d --build` after changing application code or image dependencies. The container shutdown command does not stop the separate Ollama host service.
 
-### 9. Run the automated tests (Python 3.11)
+### 10. Run the automated tests (Python 3.11)
 
 ```powershell
 py -3.11 -m venv .venv
@@ -185,7 +203,7 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-The latest verified test run completed with **32 passed**. Optional code-quality checks:
+The latest verified test run completed with **42 passed** (including observability tests). Optional code-quality checks:
 
 ```powershell
 ruff check .
@@ -199,7 +217,7 @@ git diff --check
 
 **Post-interview improvement:** The original application was demonstrated with directly running Python processes. The FastAPI and Streamlit Docker images and Compose deployment were implemented and verified afterward. This README documents the updated repository state; it does not represent the original interview demonstration as containerised.
 
-In the local verification session, both application images built successfully, both Compose services started, the UI reported the backend online, and a document-grounded remote-working policy question returned an answer with `policy.md#chunk-0000` source evidence. The automated Python test suite previously reported **32 passed**.
+In the initial containerisation verification session, both application images built successfully, the API and UI services started, the UI reported the backend online, and a document-grounded remote-working policy question returned an answer with `policy.md#chunk-0000` source evidence. **Prometheus/Grafana observability was added in a subsequent improvement**, with four Compose services started and the automated suite subsequently verified at **42 passed**. This chronology distinguishes the earlier demonstration from later enhancements.
 
 Reviewer commands to reproduce containerisation:
 
@@ -209,6 +227,7 @@ docker compose build
 docker compose up -d
 docker compose ps
 curl.exe http://localhost:8000/health
+curl.exe http://localhost:8000/metrics
 ```
 
 Check an end-to-end question in http://localhost:8501, then inspect logs if required:
@@ -217,6 +236,93 @@ Check an end-to-end question in http://localhost:8501, then inspect logs if requ
 docker compose logs --tail 50 api
 docker compose logs --tail 50 ui
 ```
+
+---
+
+## Observability & monitoring
+
+The project includes **local, containerised observability** for HTTP requests and each major RAG stage: document retrieval, evidence sufficiency and local model inference. It uses structured JSON logs, correlation IDs, Prometheus metrics and an automatically provisioned Grafana dashboard. Monitoring does not require an external telemetry service.
+
+### Grafana RAG dashboard
+
+![Grafana RAG Observability Dashboard](docs/images/grafana-rag-dashboard.png)
+
+The dashboard is provisioned from `monitoring/grafana/dashboards/rag-overview.json` into the **RAG Monitoring** folder. It includes eight panels:
+
+| Panel                    | What it shows                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| HTTP Requests per Second | Request throughput by route                                                        |
+| HTTP p95 Latency         | Estimated 95th-percentile HTTP duration, including completed streamed responses    |
+| Retrieval Latency        | Retrieval duration (histogram; p95 or average as configured in the dashboard JSON) |
+| Inference Latency        | Local model inference duration (histogram; p95 or average as configured)           |
+| Time to First Token      | Time until the first streamed inference output chunk                               |
+| Inference Outcomes       | Completed, failed, cancelled and interrupted inference streams when observed       |
+| Evidence Sufficiency     | Sufficient versus insufficient document evidence                                   |
+| HTTP Error Rate          | HTTP 5xx request rate; an absent series is not itself an error                     |
+
+**Interpretation:** This is a low-traffic, local assessment environment. Rate-based p95 charts may have gaps when no requests occur within the query window. Cumulative averages, if configured in the dashboard JSON, are based on samples since the current API process started and are useful for short demonstrations; they are not production benchmarks. Prometheus exports histograms regardless of the dashboard visualisation choice.
+
+### Monitoring architecture
+
+```text
+Browser -> Streamlit UI -> FastAPI /chat -> BM25 retrieval -> Ollama inference
+                              |                  |                 |
+                              +------ JSON logs / request ID ----------+
+                              |
+                              +-- Prometheus counters and histograms
+                                      |
+                                GET /metrics (API)
+                                      |
+                                Prometheus (scrapes api:8000 every 15s)
+                                      |
+                                Grafana (datasource: prometheus:9090)
+                                      |
+                                RAG Monitoring dashboard
+```
+
+**Request logging** is correlated using a generated request ID, returned to the client in the `x-request-id` HTTP response header. Middleware logs request start, completion and failures, including total response duration for completed streams. RAG logging records retrieval timing, selected-chunk counts, evidence sufficiency, inference timing, first-token timing, output chunk count and inference outcome. Observability logs do not intentionally contain raw document text, user questions or full generated answers.
+
+**Metrics exported by `GET /metrics`:**
+
+| Metric                              | Type      | Meaning                                                  |
+| ----------------------------------- | --------- | -------------------------------------------------------- |
+| `rag_http_requests_total`           | Counter   | Completed requests by HTTP method, safe route and status |
+| `rag_http_request_duration_seconds` | Histogram | End-to-end HTTP duration, including completed streams    |
+| `rag_retrieval_duration_seconds`    | Histogram | Document retrieval duration                              |
+| `rag_inference_duration_seconds`    | Histogram | Local inference duration                                 |
+| `rag_time_to_first_token_seconds`   | Histogram | Delay until first model output chunk                     |
+| `rag_inference_outcomes_total`      | Counter   | Inference outcome by status                              |
+| `rag_evidence_outcomes_total`       | Counter   | Evidence sufficient or insufficient                      |
+
+The middleware uses bounded route labels (`/chat`, `/health`, `/metrics`, `/other`) rather than unrestricted URL paths. Not every metric appears before its first relevant observation. HTTP metrics currently account for requests that finish sending their response body; interrupted or exceptional paths should not be interpreted as a comprehensive request total.
+
+### Access and verification
+
+1. Set `GRAFANA_ADMIN_PASSWORD` in the Git-ignored `.env` file (see Reviewer Quick Start).
+2. Start the stack: `docker compose up -d --build`.
+3. Verify `GET http://localhost:8000/health` and `GET http://localhost:8000/metrics`.
+4. Open http://localhost:9090/targets and verify that `rag-api` is **UP**.
+5. Open http://localhost:3000, sign in as `admin` with the configured password, and navigate to **Dashboards → RAG Monitoring → Local AI Document Chat | RAG Observability**.
+6. Ask a supported and an unsupported question in http://localhost:8501. Refresh Grafana after the next scrape to observe retrieval and evidence metrics; a supported question also triggers inference metrics.
+
+For a quick metrics check in PowerShell:
+
+```powershell
+(curl.exe -s http://localhost:8000/metrics) |
+  Select-String "rag_retrieval_duration_seconds_count|rag_inference_duration_seconds_count|rag_time_to_first_token_seconds_count|rag_inference_outcomes_total|rag_evidence_outcomes_total"
+```
+
+All four services are orchestrated by `docker-compose.yml`. Prometheus is configured at `monitoring/prometheus/prometheus.yml`, and Grafana's Prometheus datasource and dashboard provider live under `monitoring/grafana/provisioning/`. The monitoring services use named Docker volumes for persistence. The configured Prometheus retention period is **15 days**. Prometheus and Grafana publish their ports to **127.0.0.1** on the host; FastAPI and Streamlit retain their existing ports. This is a development/assessment deployment, not a hardened public monitoring endpoint.
+
+### Automated observability tests
+
+The test suite includes `tests/test_observability.py` for structured logging and request lifecycle behaviour, and `tests/test_metrics.py` for Prometheus metric registration and observations.
+
+```powershell
+python -m pytest -q
+```
+
+**Last verified result: 42 passed.** The observed check is a unit/integration test baseline, not a stress test or a production service-level objective.
 
 ---
 
@@ -251,6 +357,11 @@ The service currently supports:
 - fully local inference through Ollama
 - live corpus updates without restart
 - live corpus updates without manual reindexing
+- structured JSON request, retrieval and inference logging
+- correlation IDs in the `x-request-id` response header
+- Prometheus HTTP, retrieval, evidence and inference metrics
+- provisioned Grafana RAG observability dashboard
+- local Prometheus/Grafana deployment with persistent volumes
 
 ---
 
@@ -262,18 +373,25 @@ The service currently supports:
 Windows / Docker Desktop host
   |
   |-- Ollama (host process)
-  |     `-- Qwen2.5 0.5B model, port 11434
+  |     `-- Qwen2.5 0.5B, port 11434
   |
   `-- Docker Compose
-        |-- ui service: Streamlit, host port 8501
-        |      `-- BACKEND_URL=http://api:8000
+        |-- ui: Streamlit, host port 8501
+        |     `-- BACKEND_URL=http://api:8000
         |
-        `-- api service: FastAPI, host port 8000
-               |-- LLM_URL=http://host.docker.internal:11434/v1
-               `-- /data  <--- bind mount from host ./data
+        |-- api: FastAPI, host port 8000
+        |     |-- LLM_URL=http://host.docker.internal:11434/v1
+        |     |-- /data <- host bind mount ./data
+        |     `-- GET /metrics
+        |
+        |-- prometheus: host 127.0.0.1:9090
+        |     `-- scrape http://api:8000/metrics
+        |
+        `-- grafana: host 127.0.0.1:3000
+              `-- datasource http://prometheus:9090
 ```
 
-`docker-compose.yml` builds both application services from `Dockerfile`. Docker DNS resolves `api` for the UI container. The API container reaches Ollama on the host via `host.docker.internal`. `./data:/data` ensures live filesystem changes remain visible to the backend.
+`docker-compose.yml` builds both application services from `Dockerfile` and pulls Prometheus/Grafana images. Docker DNS resolves the `api` and `prometheus` service names. The API container reaches the host Ollama process through `host.docker.internal`, while `./data:/data` keeps live filesystem changes visible to the backend. Monitoring configuration and Grafana dashboards are bind-mounted into the monitoring containers; their time-series data and Grafana database use named Docker volumes.
 
 ### RAG request path
 
@@ -315,128 +433,86 @@ Added, modified, renamed or deleted supported documents affect subsequent querie
 
 ```text
 local-ai-document-chat/
-
-│
-
 ├── app/
-
-│   ├── api/
-
-│   │   ├── chat.py
-
-│   │   └── health.py
-
-│   │
-
-│   ├── corpus/
-
-│   │   ├── chunker.py
-
-│   │   ├── loader.py
-
-│   │   ├── models.py
-
-│   │   ├── state.py
-
-│   │   └── watcher.py
-
-│   │
-
-│   ├── inference/
-
-│   │   ├── client.py
-
-│   │   └── models.py
-
-│   │
-
-│   ├── prompting/
-
-│   │   └── builder.py
-
-│   │
-
-│   ├── retrieval/
-
-│   │   ├── bm25.py
-
-│   │   └── models.py
-
-│   │
-
-│   ├── config.py
-
-│   └── main.py
-
-│
-
+│   ├── api/
+│   │   ├── chat.py
+│   │   └── health.py
+│   ├── corpus/
+│   │   ├── chunker.py
+│   │   ├── loader.py
+│   │   ├── models.py
+│   │   ├── state.py
+│   │   └── watcher.py
+│   ├── inference/
+│   │   ├── client.py
+│   │   └── models.py
+│   ├── observability/
+│   │   ├── logging.py
+│   │   ├── metrics.py
+│   │   └── middleware.py
+│   ├── prompting/
+│   │   └── builder.py
+│   ├── retrieval/
+│   │   ├── bm25.py
+│   │   └── models.py
+│   ├── config.py
+│   └── main.py
 ├── ui/
-
-│   └── app.py
-
-│
-
+│   └── app.py
 ├── data/
-
-│   ├── policy.md
-
-│   └── leave-policy.md
-
-│
-
+│   ├── policy.md
+│   └── leave-policy.md
 ├── tests/
-
-│   ├── unit/
-
-│   ├── integration/
-
-│   └── security/
-
-│
-
+│   ├── unit/
+│   ├── integration/
+│   ├── security/
+│   ├── test_observability.py
+│   └── test_metrics.py
+├── monitoring/
+│   ├── prometheus/
+│   │   └── prometheus.yml
+│   └── grafana/
+│       ├── dashboards/
+│       │   └── rag-overview.json
+│       └── provisioning/
+│           ├── dashboards/
+│           │   └── dashboard.yml
+│           └── datasources/
+│               └── prometheus.yml
 ├── docs/
-
-│   ├── decisions.md
-
-│   └── troubleshooting.md
-
-│
-
+│   ├── images/
+│   │   ├── local-rag-ui.png
+│   │   └── grafana-rag-dashboard.png
+│   ├── decisions.md
+│   └── troubleshooting.md
 ├── demo/
-
 ├── evidence/
-
 ├── scripts/
-
 ├── .dockerignore
 ├── .env.example
-
 ├── .gitignore
-
 ├── Dockerfile
-
 ├── docker-compose.yml
-
 ├── pyproject.toml
-
 └── README.md
-
 ```
 
-At a high level:
+Key responsibilities:
 
-- `app/main.py` creates the application and shared runtime state
-- `app/api/chat.py` orchestrates each chat request
-- `app/corpus/` safely loads and refreshes the live document corpus
-- `app/retrieval/bm25.py` ranks evidence and checks evidence sufficiency
-- `app/prompting/builder.py` maintains the trusted/untrusted prompt boundary
-- `app/inference/client.py` communicates with the local model and streams output
-- `ui/app.py` provides the Streamlit presentation layer
-- `Dockerfile` builds the application images for both services
-- `docker-compose.yml` configures API/UI container networking and the live corpus bind mount
-- `.dockerignore` excludes local environments, secrets and unrelated directories from Docker build context
-- `docs/decisions.md` records significant engineering decisions
-- `docs/troubleshooting.md` records implementation and environment troubleshooting
+- `app/main.py` initialises FastAPI, shared runtime state and the metrics endpoint.
+- `app/api/chat.py` orchestrates chat, retrieval and local inference, including RAG instrumentation.
+- `app/corpus/` safely loads and refreshes the live document corpus.
+- `app/retrieval/bm25.py` ranks candidate evidence and checks relevance.
+- `app/prompting/builder.py` maintains the trusted/untrusted prompt boundary.
+- `app/inference/client.py` communicates with the local model and streams output.
+- `app/observability/` contains JSON logging, request correlation and Prometheus metrics.
+- `ui/app.py` provides the Streamlit presentation layer.
+- `Dockerfile` builds the application images for API and UI.
+- `docker-compose.yml` configures four services, networking, mounts and monitoring persistence.
+- `monitoring/` holds the Prometheus scrape configuration and Grafana provisioning/dashboard files.
+- `docs/images/` stores repository screenshots displayed in this README.
+- `.dockerignore` excludes local environments, secrets and unrelated directories from the image build context.
+- `docs/decisions.md` and `docs/troubleshooting.md` record engineering decisions and implementation troubleshooting.
 
 ---
 
@@ -465,10 +541,10 @@ ollama show qwen2.5:0.5b
 
 ## Configuration
 
-The application's runtime settings are environment-driven. `.env.example` documents local **direct-Python** defaults; copy it to `.env` when running outside Docker. The private `.env` file is ignored by Git.
+The application's runtime settings are environment-driven. `.env.example` documents **direct-Python** defaults; copy it to `.env` when running outside Docker. For the **Docker Compose stack**, `.env` is also required because Grafana reads `GRAFANA_ADMIN_PASSWORD`. The private `.env` file is ignored by Git.
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.example .env  # if .env does not already exist
 ```
 
 Example direct-Python configuration:
@@ -494,14 +570,16 @@ UI_REQUEST_TIMEOUT_SECONDS=90
 
 For the Docker Compose deployment, `docker-compose.yml` overrides the relevant values for container networking:
 
-| Variable         | Docker value                           | Reason                                |
-| ---------------- | -------------------------------------- | ------------------------------------- |
-| API `LLM_URL`    | `http://host.docker.internal:11434/v1` | Access Ollama running on the host     |
-| API `LLM_MODEL`  | `qwen2.5:0.5b`                         | Locally installed model               |
-| API `DATA_DIR`   | `/data`                                | Bind-mounted document directory       |
-| UI `BACKEND_URL` | `http://api:8000`                      | Reach the API by Compose service name |
+| Variable                             | Docker value                           | Reason                                    |
+| ------------------------------------ | -------------------------------------- | ----------------------------------------- |
+| API `LLM_URL`                        | `http://host.docker.internal:11434/v1` | Access Ollama running on the host         |
+| API `LLM_MODEL`                      | `qwen2.5:0.5b`                         | Locally installed model                   |
+| API `DATA_DIR`                       | `/data`                                | Bind-mounted document directory           |
+| UI `BACKEND_URL`                     | `http://api:8000`                      | Reach the API by Compose service name     |
+| Grafana `GF_SECURITY_ADMIN_USER`     | `admin`                                | Initial administrator username            |
+| Grafana `GF_SECURITY_ADMIN_PASSWORD` | `${GRAFANA_ADMIN_PASSWORD}`            | Private admin password supplied by `.env` |
 
-Other settings use application defaults unless explicitly overridden. **The Compose setup does not require `.env` to start** because container-specific values are supplied by the Compose configuration.
+Other application settings use defaults unless explicitly overridden. **The four-service Compose setup requires `GRAFANA_ADMIN_PASSWORD` in `.env`**; the current Grafana configuration deliberately fails validation if this variable is missing. Keep `.env` out of Git. The Prometheus/Grafana browser ports are bound to localhost, but API/UI ports retain their existing bindings.
 
 ### Retrieval and corpus settings
 
@@ -521,6 +599,7 @@ Other settings use application defaults unless explicitly overridden. **The Comp
 - `BACKEND_URL`: endpoint used by the Streamlit UI.
 - `UI_REQUEST_TIMEOUT_SECONDS`: timeout for UI-to-backend chat requests.
 - `LOG_LEVEL`: application logging verbosity.
+- `GRAFANA_ADMIN_PASSWORD`: Grafana administrator password required by Docker Compose; not an API or model credential.
 
 ---
 
@@ -1145,54 +1224,35 @@ The current security design includes:
 
 ## Quality checks
 
-The current development checks are:
+Run the full automated test suite from the activated Python 3.11 environment:
 
 ```powershell
-pytest -q
+python -m pytest -q
+```
 
+**Latest verified result (13 October 2026): 42 passed.** This includes the original RAG functionality and additional observability/Prometheus tests.
+
+Optional static analysis and hygiene checks:
+
+```powershell
 ruff check .
-
 mypy app
-
 git diff --check
-
 ```
 
-At the previously verified quality checkpoint:
+Earlier Ruff and mypy checks were reported successful; these tools were **not re-verified in the latest 42-test session**, so re-run them before representing them as part of a new release validation.
 
-```text
-32 tests passed
+The test suite covers areas including:
 
-Ruff checks passed
-
-mypy checks passed
-
-git diff --check clean
-
-```
-
-The automated suite currently covers areas including:
-
-- safe corpus loading
-- deterministic chunking
-- hidden files
-- unsupported files
-- invalid document content
-- corpus snapshot state
-- live add behaviour
-- live modification behaviour
-- live delete behaviour
-- live rename behaviour
-- changing-file stability
-- lexical evidence retrieval
-- top-k behaviour
-- minimum relevance filtering
-- partial lexical-overlap rejection
-- context budgeting
-- insufficient evidence
-- guarded prompt construction
-- separation of system instructions and evidence
-- application-controlled source identifiers
+- safe document loading, hidden/unsupported files and invalid UTF-8
+- deterministic chunking and corpus snapshot state
+- live add, modify, delete and rename behaviour, including file-change stability
+- BM25 retrieval, relevance filtering and lexical coverage validation
+- context budgeting and insufficient-evidence decisions
+- guarded prompt construction, trust boundaries and source attribution
+- structured JSON logging with safe field handling
+- HTTP request ID propagation and stream completion logging
+- Prometheus metric registration, histogram observations and counter increments
 
 ---
 
@@ -1248,7 +1308,7 @@ The README focuses on the current architecture and behaviour rather than reprodu
 
 ## Current project status
 
-The application includes a working browser interface and a subsequently implemented Docker Compose deployment. Containerisation was completed after the initial technical interview demonstration.
+The application includes a working browser interface, subsequent Docker Compose deployment and a post-demonstration local observability stack. Containerisation and monitoring were completed after the original technical interview demonstration; they are enhancements to the current repository, not features claimed to have been presented during the initial demonstration.
 
 Completed:
 
@@ -1293,6 +1353,12 @@ Completed:
 - static analysis
 - chronological engineering decision log
 - chronological troubleshooting log
+- structured JSON logging and HTTP request correlation IDs
+- retrieval, inference, TTFT and evidence outcome Prometheus metrics
+- local Prometheus scraping and Grafana datasource provisioning
+- preconfigured eight-panel Grafana RAG dashboard with screenshot
+- persistent Prometheus and Grafana volumes
+- 42 passing automated tests (latest verified run)
 
 ---
 
