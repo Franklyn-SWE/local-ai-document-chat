@@ -1,3 +1,4 @@
+
 """
 Purpose:
     Exposes the document-grounded chat endpoint and streams model output
@@ -6,12 +7,20 @@ Purpose:
 Place in the system:
     This is the request orchestration layer. It connects the active corpus,
     retrieval, guarded prompt assembly, and local inference client.
+
+Observability:
+    Records retrieval latency, evidence sufficiency, inference duration,
+    time to first token, output chunk count, and inference outcome.
+    Uses request IDs to correlate events without logging sensitive content.
 """
 
+import asyncio
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -22,7 +31,9 @@ from app.inference.models import InferenceError, InferenceRequest
 from app.prompting.builder import build_prompt
 from app.retrieval.bm25 import retrieve
 
+
 router = APIRouter()
+logger = logging.getLogger("app.api.chat")
 
 
 class ChatRequest(BaseModel):
@@ -43,8 +54,13 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
     """Create a chat router bound to the application's active corpus state."""
 
     @router.post("/chat")
-    async def chat(request: ChatRequest) -> StreamingResponse:
+    async def chat(
+        request: ChatRequest,
+        http_request: Request,
+    ) -> StreamingResponse:
         settings = get_settings()
+
+        request_id = http_request.state.request_id
 
         question = request.question.strip()
 
@@ -56,6 +72,12 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
 
         snapshot = corpus_state.get_snapshot()
 
+        # --------------------------------------------------
+        # 1. BM25 retrieval observability
+        # --------------------------------------------------
+
+        retrieval_start = time.perf_counter()
+
         result = retrieve(
             question,
             snapshot.chunks,
@@ -64,7 +86,27 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
             token_budget=settings.context_token_budget,
         )
 
+        retrieval_ms = round(
+            (time.perf_counter() - retrieval_start) * 1000,
+            2,
+        )
+
+        logger.info(
+            "rag.retrieval.completed",
+            extra={
+                "request_id": request_id,
+                "retrieval_ms": retrieval_ms,
+                "selected_chunks": len(result.selected),
+                "insufficient_evidence": result.insufficient_evidence,
+            },
+        )
+
+        # --------------------------------------------------
+        # 2. Insufficient evidence handling
+        # --------------------------------------------------
+
         if result.insufficient_evidence:
+
             async def insufficient_stream() -> AsyncIterator[str]:
                 yield _event(
                     "status",
@@ -82,6 +124,10 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                 media_type="text/event-stream",
             )
 
+        # --------------------------------------------------
+        # 3. Grounded prompt construction
+        # --------------------------------------------------
+
         prompt = build_prompt(
             question,
             result.selected,
@@ -92,6 +138,10 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
             model=settings.llm_model,
             timeout_seconds=settings.llm_timeout_seconds,
         )
+
+        # --------------------------------------------------
+        # 4. Streaming inference observability
+        # --------------------------------------------------
 
         async def stream_response() -> AsyncIterator[str]:
             yield _event(
@@ -106,6 +156,12 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                 },
             )
 
+            inference_start = time.perf_counter()
+
+            ttft_ms = None
+            output_chunks = 0
+            inference_status = "interrupted"
+
             try:
                 async for text in client.stream(
                     InferenceRequest(
@@ -113,10 +169,23 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                         user_prompt=prompt.user_prompt,
                     )
                 ):
+                    # Measure time to first generated text.
+                    if ttft_ms is None:
+                        ttft_ms = round(
+                            (
+                                time.perf_counter() - inference_start
+                            ) * 1000,
+                            2,
+                        )
+
+                    output_chunks += 1
+
                     yield _event(
                         "token",
                         {"text": text},
                     )
+
+                inference_status = "completed"
 
                 yield _event(
                     "done",
@@ -124,11 +193,36 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                 )
 
             except InferenceError as exc:
+                inference_status = "failed"
+
                 yield _event(
                     "error",
                     {
                         "status": "inference_failed",
                         "message": str(exc),
+                    },
+                )
+
+            except asyncio.CancelledError:
+                inference_status = "cancelled"
+                raise
+
+            finally:
+                inference_ms = round(
+                    (
+                        time.perf_counter() - inference_start
+                    ) * 1000,
+                    2,
+                )
+
+                logger.info(
+                    "rag.inference.completed",
+                    extra={
+                        "request_id": request_id,
+                        "inference_ms": inference_ms,
+                        "ttft_ms": ttft_ms,
+                        "output_chunks": output_chunks,
+                        "inference_status": inference_status,
                     },
                 )
 
