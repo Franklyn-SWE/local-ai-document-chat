@@ -14,7 +14,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from fastapi import Response
 from app.api.chat import create_chat_router
 from app.api.health import router as health_router
 from app.config import get_settings
@@ -78,3 +79,11 @@ app = FastAPI(
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(health_router)
 app.include_router(create_chat_router(corpus_state))
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    """Expose Prometheus metrics for monitoring."""
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )

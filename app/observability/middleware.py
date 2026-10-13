@@ -1,5 +1,5 @@
 
-"""Request correlation and HTTP lifecycle logging."""
+"""Request correlation, HTTP lifecycle logging and Prometheus metrics."""
 
 import logging
 import time
@@ -7,11 +7,13 @@ from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.observability.metrics import HTTP_REQUESTS, HTTP_DURATION
+
 logger = logging.getLogger("app.observability.http")
 
 
 class RequestLoggingMiddleware:
-    """Log requests, including completion of streamed responses."""
+    """Track HTTP requests, including streamed response completion."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -36,8 +38,12 @@ class RequestLoggingMiddleware:
         method = scope.get("method", "")
         path = scope.get("path", "")
 
-        # Avoid logging arbitrary user-controlled paths.
-        safe_path = path if path in ("/chat", "/health") else "/other"
+        # Prevent arbitrary paths from creating high-cardinality labels.
+        safe_path = (
+            path
+            if path in ("/chat", "/health", "/metrics")
+            else "/other"
+        )
 
         logger.info(
             "http.request.started",
@@ -60,13 +66,28 @@ class RequestLoggingMiddleware:
                 and not message.get("more_body", False)
             ):
                 completed = True
+                duration_seconds = time.perf_counter() - start
+
+                # Prometheus: request count and end-to-end latency.
+                HTTP_REQUESTS.labels(
+                    method=method,
+                    route=safe_path,
+                    status_code=str(status_code),
+                ).inc()
+
+                HTTP_DURATION.labels(
+                    method=method,
+                    route=safe_path,
+                ).observe(duration_seconds)
+
+                # Structured JSON logging.
                 logger.info(
                     "http.request.completed",
                     extra={
                         "request_id": request_id,
                         "status_code": status_code,
                         "duration_ms": round(
-                            (time.perf_counter() - start) * 1000, 2
+                            duration_seconds * 1000, 2
                         ),
                     },
                 )

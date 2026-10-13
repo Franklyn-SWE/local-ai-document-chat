@@ -1,4 +1,5 @@
 
+
 """
 Purpose:
     Exposes the document-grounded chat endpoint and streams model output
@@ -11,6 +12,8 @@ Place in the system:
 Observability:
     Records retrieval latency, evidence sufficiency, inference duration,
     time to first token, output chunk count, and inference outcome.
+
+    Exposes Prometheus metrics alongside structured JSON logs.
     Uses request IDs to correlate events without logging sensitive content.
 """
 
@@ -28,6 +31,13 @@ from app.config import get_settings
 from app.corpus.state import CorpusState
 from app.inference.client import LocalInferenceClient
 from app.inference.models import InferenceError, InferenceRequest
+from app.observability.metrics import (
+    RETRIEVAL_DURATION,
+    INFERENCE_DURATION,
+    TIME_TO_FIRST_TOKEN,
+    INFERENCE_OUTCOMES,
+    EVIDENCE_OUTCOMES,
+)
 from app.prompting.builder import build_prompt
 from app.retrieval.bm25 import retrieve
 
@@ -51,7 +61,7 @@ def _event(event_type: str, payload: dict[str, object]) -> str:
 
 
 def create_chat_router(corpus_state: CorpusState) -> APIRouter:
-    """Create a chat router bound to the application's active corpus state."""
+    """Create a chat router bound to the active corpus state."""
 
     @router.post("/chat")
     async def chat(
@@ -59,7 +69,6 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
         http_request: Request,
     ) -> StreamingResponse:
         settings = get_settings()
-
         request_id = http_request.state.request_id
 
         question = request.question.strip()
@@ -86,11 +95,22 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
             token_budget=settings.context_token_budget,
         )
 
-        retrieval_ms = round(
-            (time.perf_counter() - retrieval_start) * 1000,
-            2,
-        )
+        retrieval_seconds = time.perf_counter() - retrieval_start
+        retrieval_ms = round(retrieval_seconds * 1000, 2)
 
+        # Prometheus: retrieval latency.
+        RETRIEVAL_DURATION.observe(retrieval_seconds)
+
+        # Prometheus: evidence sufficiency.
+        EVIDENCE_OUTCOMES.labels(
+            status=(
+                "insufficient"
+                if result.insufficient_evidence
+                else "sufficient"
+            )
+        ).inc()
+
+        # Structured logging.
         logger.info(
             "rag.retrieval.completed",
             extra={
@@ -169,14 +189,16 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                         user_prompt=prompt.user_prompt,
                     )
                 ):
-                    # Measure time to first generated text.
+                    # Time to first generated text.
                     if ttft_ms is None:
-                        ttft_ms = round(
-                            (
-                                time.perf_counter() - inference_start
-                            ) * 1000,
-                            2,
+                        ttft_seconds = (
+                            time.perf_counter() - inference_start
                         )
+
+                        ttft_ms = round(ttft_seconds * 1000, 2)
+
+                        # Prometheus: record TTFT once.
+                        TIME_TO_FIRST_TOKEN.observe(ttft_seconds)
 
                     output_chunks += 1
 
@@ -208,13 +230,24 @@ def create_chat_router(corpus_state: CorpusState) -> APIRouter:
                 raise
 
             finally:
+                inference_seconds = (
+                    time.perf_counter() - inference_start
+                )
+
                 inference_ms = round(
-                    (
-                        time.perf_counter() - inference_start
-                    ) * 1000,
+                    inference_seconds * 1000,
                     2,
                 )
 
+                # Prometheus: total inference duration.
+                INFERENCE_DURATION.observe(inference_seconds)
+
+                # Prometheus: inference outcome.
+                INFERENCE_OUTCOMES.labels(
+                    status=inference_status
+                ).inc()
+
+                # Structured JSON logging.
                 logger.info(
                     "rag.inference.completed",
                     extra={
